@@ -141,3 +141,14 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+
+# Foundry
+contracts/out/
+contracts/cache/
+contracts/broadcast/*/31337/
+
+# Prisma generated client (regenerated via `prisma generate`)
+apps/api/generated/
+
+# pnpm
+pnpm-lock.yaml.bak

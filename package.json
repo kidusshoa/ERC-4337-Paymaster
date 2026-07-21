@@ -1,0 +1,34 @@
+{
+  "name": "erc4337-paymaster",
+  "private": true,
+  "version": "0.0.1",
+  "description": "ERC-4337 Verifying Paymaster & Gas Relayer — monorepo root",
+  "engines": {
+    "node": ">=20",
+    "pnpm": ">=9"
+  },
+  "scripts": {
+    "lint": "pnpm -r --if-present run lint",
+    "format": "prettier --write \"**/*.{ts,js,json,md}\" --ignore-unknown",
+    "format:check": "prettier --check \"**/*.{ts,js,json,md}\" --ignore-unknown",
+    "prepare": "husky"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.18.0",
+    "eslint": "^9.18.0",
+    "eslint-config-prettier": "^9.1.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^15.4.1",
+    "prettier": "^3.4.2",
+    "typescript": "^5.7.3",
+    "typescript-eslint": "^8.20.0"
+  },
+  "lint-staged": {
+    "*.{ts,js}": [
+      "eslint --fix"
+    ],
+    "*.{ts,js,json,md}": [
+      "prettier --write"
+    ]
+  }
+}

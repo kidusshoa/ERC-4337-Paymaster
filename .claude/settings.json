@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(forge --version)",
+      "Bash(anvil --version)",
+      "Bash(docker --version)",
+      "Bash(chmod +x .husky/pre-commit)",
+      "Bash(echo \"EXIT: $?\")"
+    ]
+  }
+}
