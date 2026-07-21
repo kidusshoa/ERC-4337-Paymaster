@@ -13,7 +13,10 @@
       "Bash(git add *)",
       "Bash(git commit *)",
       "Bash(echo \"COMMIT EXIT: $?\")",
-      "Bash(git reset *)"
+      "Bash(git reset *)",
+      "Bash(curl -L https://foundry.paradigm.xyz)",
+      "Bash(bash)",
+      "Bash(pkill -f \"anvil --port 8545\")"
     ]
   }
 }
