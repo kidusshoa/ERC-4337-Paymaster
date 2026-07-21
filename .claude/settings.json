@@ -5,7 +5,15 @@
       "Bash(anvil --version)",
       "Bash(docker --version)",
       "Bash(chmod +x .husky/pre-commit)",
-      "Bash(echo \"EXIT: $?\")"
+      "Bash(echo \"EXIT: $?\")",
+      "Bash(pnpm format:check)",
+      "Bash(pnpm format *)",
+      "Bash(lsof -nP -iTCP:5432 -sTCP:LISTEN)",
+      "Bash(lsof -nP -iTCP:6379 -sTCP:LISTEN)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(echo \"COMMIT EXIT: $?\")",
+      "Bash(git reset *)"
     ]
   }
 }
