@@ -52,7 +52,14 @@
       "Bash(python3 -c ' *)",
       "Bash(pnpm test:e2e -- rate-limit)",
       "Bash(node -e \"console.log\\(require.resolve\\('dotenv'\\)\\)\")",
-      "Bash(pnpm test:e2e -- prisma)"
+      "Bash(pnpm test:e2e -- prisma)",
+      "Bash(pnpm test:e2e -- policy)",
+      "Bash(node -e \"console.log\\('0xdead0000dead0000dead0000dead0000dead0000'.length - 2\\)\")",
+      "Bash(pnpm test:e2e -- paymaster)",
+      "Bash(kill -9 34923)",
+      "Bash(curl -s -X POST http://127.0.0.1:5010/paymaster/sponsor -H 'Content-Type: application/json' -d '{ *)",
+      "Bash(curl -s http://127.0.0.1:5010/docs-json)",
+      "Bash(kill -9 36388)"
     ]
   }
 }
