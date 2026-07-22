@@ -4,8 +4,10 @@ Foundry project for the ERC-4337 `VerifyingPaymaster` contract, targeting **Entr
 
 ## Layout
 
-- `src/` — our contracts (`VerifyingPaymaster.sol`, Phase 3)
-- `script/` — deployment scripts (`DeployEntryPoint.s.sol` for local Anvil, `DeployPaymaster.s.sol` for Phase 4)
+- `src/` — our contracts (`VerifyingPaymaster.sol`)
+- `script/` — deployment scripts:
+  - `DeployEntryPoint.s.sol` — local-only, deploys a standalone EntryPoint to Anvil
+  - `DeployPaymaster.s.sol` — deploys `VerifyingPaymaster` + funds its deposit; network-conditional (fresh EntryPoint on Anvil, canonical singleton everywhere else)
 - `test/` — Foundry tests
 - `lib/` — vendored dependencies as git submodules: `account-abstraction` (eth-infinitism, v0.7.0), `openzeppelin-contracts` (v5.0.2), `forge-std`
 
@@ -31,4 +33,29 @@ forge script script/DeployEntryPoint.s.sol:DeployEntryPointScript \
 
 `DEPLOYER_PRIVATE_KEY` in `.env.example` is Anvil's well-known account #0 test key — never fund or reuse it on a real network.
 
-On public networks, EntryPoint is **not** redeployed — see `DeployPaymaster.s.sol` (Phase 4), which targets the canonical singleton at `0x0000000071727De22E5E9d8BAf0edAc6f37da032`.
+## Deploying VerifyingPaymaster
+
+`DeployPaymaster.s.sol` picks its EntryPoint target based on `block.chainid`:
+
+- **Anvil (31337)**: deploys a fresh `EntryPoint`, since none exists yet.
+- **Every public network** (Sepolia, mainnet, ...): targets the canonical v0.7 singleton already live at `0x0000000071727De22E5E9d8BAf0edAc6f37da032` — it is never redeployed.
+
+Local (Anvil):
+
+```shell
+anvil                                                          # in one terminal
+DEPLOYER_PRIVATE_KEY=... VERIFYING_SIGNER_ADDRESS=... \
+forge script script/DeployPaymaster.s.sol:DeployPaymasterScript \
+  --rpc-url http://127.0.0.1:8545 --broadcast                  # in another
+```
+
+Sepolia (requires your own funded deployer key, RPC URL, and Etherscan API key in `.env` — this is a real, public, gas-spending action, so run it deliberately rather than as part of any automated setup):
+
+```shell
+forge script script/DeployPaymaster.s.sol:DeployPaymasterScript \
+  --rpc-url sepolia --broadcast --verify
+```
+
+`VERIFYING_SIGNER_ADDRESS` should be the address of the backend's `SignerService` key (`modules/crypto`, Phase 6) — the address that signs `paymasterAndData` off-chain. `PAYMASTER_INITIAL_DEPOSIT_WEI` optionally funds the EntryPoint deposit immediately after deploy; leave at `0` and call `paymaster.deposit()` later if you'd rather fund it separately.
+
+Correctness of the network-conditional branch itself (Anvil → fresh EntryPoint, everything else → canonical address) is covered by `test/DeployPaymaster.t.sol`, which etches real EntryPoint bytecode at the canonical address to simulate a public network without needing a live RPC.
