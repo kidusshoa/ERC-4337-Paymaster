@@ -5,3 +5,5 @@ packages:
 # calls in this repo and nothing here needs its output.
 allowBuilds:
   "@scarf/scarf": false
+minimumReleaseAgeExclude:
+  - viem@2.55.5

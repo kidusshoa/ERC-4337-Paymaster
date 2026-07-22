@@ -47,7 +47,9 @@
       "Bash(echo \"checked 5010-5019, exit code: $?\")",
       "Bash(curl -s -i http://127.0.0.1:5010/health)",
       "Bash(lsof -nP -iTCP:5010 -sTCP:LISTEN)",
-      "Bash(kill -9 12682)"
+      "Bash(kill -9 12682)",
+      "Bash(node -e ' *)",
+      "Bash(python3 -c ' *)"
     ]
   }
 }
