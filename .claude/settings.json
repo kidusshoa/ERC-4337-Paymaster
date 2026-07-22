@@ -50,7 +50,9 @@
       "Bash(kill -9 12682)",
       "Bash(node -e ' *)",
       "Bash(python3 -c ' *)",
-      "Bash(pnpm test:e2e -- rate-limit)"
+      "Bash(pnpm test:e2e -- rate-limit)",
+      "Bash(node -e \"console.log\\(require.resolve\\('dotenv'\\)\\)\")",
+      "Bash(pnpm test:e2e -- prisma)"
     ]
   }
 }

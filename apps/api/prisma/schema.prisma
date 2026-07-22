@@ -1,0 +1,101 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserOpStatus {
+  PENDING
+  SUBMITTED
+  CONFIRMED
+  FAILED
+  STUCK
+}
+
+/// A sponsorship rule: which target contract/methods this paymaster will pay gas for,
+/// and how many ops per wallet per day it'll sponsor under that rule.
+model SponsorshipPolicy {
+  id      String @id @default(cuid())
+  name    String
+  chainId Int
+
+  /// null = any contract allowed under this policy.
+  targetContract String?
+
+  /// 4-byte hex selectors (e.g. "0xa9059cbb"); empty = any method on targetContract allowed.
+  allowedSelectors String[]
+
+  dailyQuota  Int
+  maxGasPerOp BigInt?
+  isActive    Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  userOperations UserOperation[]
+  quotaUsage     WalletQuotaUsage[]
+
+  @@unique([chainId, targetContract])
+  @@map("sponsorship_policies")
+}
+
+/// One row per sponsored UserOperation, tracking it through the relayer's state
+/// machine: PENDING (signed, not yet submitted) -> SUBMITTED (broadcast to the
+/// EntryPoint) -> CONFIRMED/FAILED, with STUCK as a transient branch off SUBMITTED
+/// while the gas-bumping worker (Phase 12) retries with higher fees.
+model UserOperation {
+  id         String @id @default(cuid())
+  userOpHash String @unique
+
+  chainId    Int
+  entryPoint String
+  sender     String
+  nonce      String
+  callData   String
+
+  paymasterAndData String
+  signature        String
+
+  status UserOpStatus @default(PENDING)
+
+  policyId String?
+  policy   SponsorshipPolicy? @relation(fields: [policyId], references: [id])
+
+  submittedTxHash      String?
+  maxFeePerGas         String?
+  maxPriorityFeePerGas String?
+  bumpCount            Int     @default(0)
+
+  blockNumber   BigInt?
+  gasUsed       String?
+  failureReason String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([sender, createdAt])
+  @@index([status])
+  @@map("user_operations")
+}
+
+/// Atomic per-wallet, per-policy, per-day counter backing the wallet-tier quota check
+/// in modules/paymaster's PolicyService. Kept as a dedicated counter (upserted and
+/// incremented directly) rather than derived by counting UserOperation rows, since
+/// that check sits on the sponsor endpoint's hot path.
+model WalletQuotaUsage {
+  id            String            @id @default(cuid())
+  walletAddress String
+  policyId      String
+  policy        SponsorshipPolicy @relation(fields: [policyId], references: [id])
+
+  /// Truncated to the UTC calendar date this counter applies to.
+  day      DateTime
+  opsCount Int      @default(0)
+
+  @@unique([walletAddress, policyId, day])
+  @@map("wallet_quota_usage")
+}

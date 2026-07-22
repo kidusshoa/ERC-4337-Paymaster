@@ -9,6 +9,10 @@ allowBuilds:
   # works fine without it (pure-JS fallback) but it's a reputable, widely-used package
   # (msgpackr/msgpackr-extract, maintained by kriszyp) — allowed for the perf benefit.
   msgpackr-extract: true
+  # Prisma's postinstall downloads the query engine binaries — required, not optional.
+  "@prisma/client": true
+  "@prisma/engines": true
+  prisma: true
 minimumReleaseAgeExclude:
   - viem@2.55.5
   - bullmq@5.80.10
