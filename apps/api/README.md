@@ -9,10 +9,10 @@ cp .env.example .env
 pnpm --filter @paymaster/api start:dev
 ```
 
-- API: http://localhost:3300
-- Swagger docs: http://localhost:3300/docs
+- API: http://localhost:5010
+- Swagger docs: http://localhost:5010/docs
 
-`PORT` defaults to 3300 (not the more common 3000) to avoid clashing with other local projects.
+`PORT` defaults to 5010 — from the 5010-5019 range reserved for this project's own services, rather than the more common 3000, to avoid clashing with other local projects.
 
 ## Structure
 

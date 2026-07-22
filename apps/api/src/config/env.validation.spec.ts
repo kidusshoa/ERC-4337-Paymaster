@@ -6,7 +6,7 @@ describe('envValidationSchema', () => {
 
     expect(error).toBeUndefined();
     expect(value.NODE_ENV).toBe('development');
-    expect(value.PORT).toBe(3300);
+    expect(value.PORT).toBe(5010);
   });
 
   it('accepts a valid explicit configuration', () => {
