@@ -1,2 +1,7 @@
 packages:
   - "apps/*"
+# @scarf/scarf (pulled in transitively via swagger-ui-dist -> @nestjs/swagger) runs a
+# telemetry postinstall script — denied, since we don't want install-time analytics
+# calls in this repo and nothing here needs its output.
+allowBuilds:
+  "@scarf/scarf": false
