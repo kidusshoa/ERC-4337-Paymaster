@@ -17,13 +17,31 @@ pnpm --filter @paymaster/api start:dev
 ## Structure
 
 - `src/config/` — env validation (Joi schema, fails fast at boot on missing/malformed vars)
-- `src/common/` — global exception filter, logging interceptor, correlation-ID middleware
+- `src/common/` — global exception filter, logging interceptor, correlation-ID middleware, `RateLimitGuard` (Redis-backed, IP + per-wallet tiers)
 - `src/modules/health/` — liveness endpoint
-- more modules land in later build phases: `modules/crypto` (signer), `modules/paymaster` (policy + signing), `modules/relayer` (submission + state machine)
+- `src/modules/crypto/` — `SignerService` (KMS-swappable signer) + viem client factory
+- `src/modules/redis/` — shared `ioredis` client, used by `RateLimitGuard`
+- `src/modules/queue/` — root BullMQ connection (first real queue lands in the stuck-tx/gas-bumping worker)
+- more modules land in later build phases: `modules/paymaster` (policy + signing), `modules/relayer` (submission + state machine)
+
+Note: `CryptoModule`, `RedisModule`, and `QueueModule` are built and unit-tested standalone but not yet imported into `AppModule` — each gets wired in once a real consumer needs it (`modules/paymaster`, Phase 9, is the first).
+
+## Rate limiting
+
+`RateLimitGuard` enforces an IP tier on every route it's applied to, plus an optional per-wallet tier on routes annotated with `@RateLimitWalletField('sender')` (or a dot path like `'userOp.sender'`):
+
+```ts
+@Post('sponsor')
+@UseGuards(RateLimitGuard)
+@RateLimitWalletField('sender')
+sponsor(@Body() dto: SponsorUserOpDto) { ... }
+```
+
+Requires Redis reachable (`docker compose up -d redis`) — see `REDIS_URL` and the `RATE_LIMIT_*` vars in `.env.example`.
 
 ## Testing
 
 ```shell
 pnpm test        # unit tests
-pnpm test:e2e    # e2e tests (boots a full Nest app in-process)
+pnpm test:e2e    # e2e tests (boots a full Nest app in-process; rate-limit suite needs Redis running)
 ```

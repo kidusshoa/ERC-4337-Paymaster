@@ -5,5 +5,10 @@ packages:
 # calls in this repo and nothing here needs its output.
 allowBuilds:
   "@scarf/scarf": false
+  # msgpackr-extract (bullmq -> msgpackr) is an optional native accelerator; msgpackr
+  # works fine without it (pure-JS fallback) but it's a reputable, widely-used package
+  # (msgpackr/msgpackr-extract, maintained by kriszyp) — allowed for the perf benefit.
+  msgpackr-extract: true
 minimumReleaseAgeExclude:
   - viem@2.55.5
+  - bullmq@5.80.10
