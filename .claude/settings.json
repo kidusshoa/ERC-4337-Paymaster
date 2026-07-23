@@ -59,7 +59,15 @@
       "Bash(kill -9 34923)",
       "Bash(curl -s -X POST http://127.0.0.1:5010/paymaster/sponsor -H 'Content-Type: application/json' -d '{ *)",
       "Bash(curl -s http://127.0.0.1:5010/docs-json)",
-      "Bash(kill -9 36388)"
+      "Bash(kill -9 36388)",
+      "Bash(pnpm test:e2e -- paymaster-onchain)",
+      "Bash(pnpm test:e2e -- debug-onchain)",
+      "Bash(pnpm test:e2e -- --testPathIgnorePatterns=paymaster-onchain)",
+      "Bash(echo \"EXIT CODE: $?\")",
+      "Bash(pkill -9 -f \"anvil --port 8549\")",
+      "Bash(forge test *)",
+      "Bash(pnpm test:e2e -- user-op-state-machine)",
+      "Bash(pnpm test:e2e -- relayer)"
     ]
   }
 }

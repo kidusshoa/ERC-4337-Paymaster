@@ -1,6 +1,14 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Chain, createPublicClient, http, PublicClient } from 'viem';
+import {
+  Account,
+  Chain,
+  createPublicClient,
+  createWalletClient,
+  http,
+  PublicClient,
+  WalletClient,
+} from 'viem';
 import { foundry, mainnet, sepolia } from 'viem/chains';
 
 const KNOWN_CHAINS: Record<number, Chain> = {
@@ -18,20 +26,21 @@ const KNOWN_CHAINS: Record<number, Chain> = {
 @Injectable()
 export class ViemClientService {
   private readonly chain: Chain;
+  private readonly rpcUrl: string;
   private readonly publicClient: PublicClient;
 
   constructor(private readonly configService: ConfigService) {
     const chainId = this.configService.get<number>('CHAIN_ID', 31337);
-    const rpcUrl = this.configService.get<string>('CHAIN_RPC_URL', 'http://127.0.0.1:8545');
+    this.rpcUrl = this.configService.get<string>('CHAIN_RPC_URL', 'http://127.0.0.1:8545');
 
     this.chain = KNOWN_CHAINS[chainId] ?? {
       id: chainId,
       name: `chain-${chainId}`,
       nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
-      rpcUrls: { default: { http: [rpcUrl] } },
+      rpcUrls: { default: { http: [this.rpcUrl] } },
     };
 
-    this.publicClient = createPublicClient({ chain: this.chain, transport: http(rpcUrl) });
+    this.publicClient = createPublicClient({ chain: this.chain, transport: http(this.rpcUrl) });
   }
 
   getChain(): Chain {
@@ -40,5 +49,11 @@ export class ViemClientService {
 
   getPublicClient(): PublicClient {
     return this.publicClient;
+  }
+
+  /** A fresh WalletClient for the given account — one per caller, since each account
+   *  (paymaster signer, relayer signer, ...) needs its own. */
+  getWalletClient(account: Account): WalletClient {
+    return createWalletClient({ account, chain: this.chain, transport: http(this.rpcUrl) });
   }
 }

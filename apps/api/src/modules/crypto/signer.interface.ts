@@ -16,3 +16,7 @@ export interface SignerService {
 }
 
 export const SIGNER_SERVICE = Symbol('SIGNER_SERVICE');
+
+/** Distinct signer for the relayer/bundler EOA (modules/relayer) — a separate role
+ *  and, in production, typically a separate key from the paymaster signer above. */
+export const RELAYER_SIGNER_SERVICE = Symbol('RELAYER_SIGNER_SERVICE');

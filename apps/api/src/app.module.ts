@@ -4,6 +4,7 @@ import { envValidationSchema } from './config/env.validation';
 import { CorrelationIdMiddleware } from './common/middleware/correlation-id.middleware';
 import { HealthModule } from './modules/health/health.module';
 import { PaymasterModule } from './modules/paymaster/paymaster.module';
+import { RelayerModule } from './modules/relayer/relayer.module';
 
 @Module({
   imports: [
@@ -17,6 +18,7 @@ import { PaymasterModule } from './modules/paymaster/paymaster.module';
     }),
     HealthModule,
     PaymasterModule,
+    RelayerModule,
   ],
 })
 export class AppModule implements NestModule {

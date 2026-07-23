@@ -2,6 +2,7 @@ import { envValidationSchema } from './env.validation';
 
 const VALID_BASE_ENV = {
   SIGNER_PRIVATE_KEY: '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80',
+  RELAYER_PRIVATE_KEY: '0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a',
   DATABASE_URL: 'postgresql://paymaster:paymaster@localhost:5434/paymaster?schema=public',
   ENTRY_POINT_ADDRESS: '0x0000000071727De22E5E9d8BAf0edAc6f37da032',
   PAYMASTER_CONTRACT_ADDRESS: '0x2e234DAe75C793f67A35089C9d99245E1C58470b',

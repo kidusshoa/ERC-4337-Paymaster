@@ -52,7 +52,13 @@ export class PaymasterService {
           entryPoint,
           sender: dto.sender,
           nonce: userOp.nonce.toString(),
+          initCode: dto.initCode,
           callData: dto.callData,
+          callGasLimit: userOp.callGasLimit.toString(),
+          verificationGasLimit: userOp.verificationGasLimit.toString(),
+          preVerificationGas: userOp.preVerificationGas.toString(),
+          opMaxFeePerGas: userOp.maxFeePerGas.toString(),
+          opMaxPriorityFeePerGas: userOp.maxPriorityFeePerGas.toString(),
           paymasterAndData: signed.paymasterAndData,
           // The account signs the finished op (including our paymasterAndData)
           // client-side, after this response — not known until Phase 11's submit.

@@ -55,7 +55,17 @@ model UserOperation {
   entryPoint String
   sender     String
   nonce      String
+  initCode   String @default("0x")
   callData   String
+
+  /// The UserOp's own signed-over gas fields (immutable once set — required to
+  /// reconstruct the exact PackedUserOperation the signatures were computed
+  /// against, for both initial submission and Phase 12's gas-bumped resubmission).
+  callGasLimit           String
+  verificationGasLimit   String
+  preVerificationGas     String
+  opMaxFeePerGas         String
+  opMaxPriorityFeePerGas String
 
   paymasterAndData String
   signature        String
@@ -66,6 +76,9 @@ model UserOperation {
   policy   SponsorshipPolicy? @relation(fields: [policyId], references: [id])
 
   submittedTxHash      String?
+  /// Gas price of the relayer's own *outer* transaction submitting handleOps —
+  /// distinct from opMaxFeePerGas/opMaxPriorityFeePerGas above; this is what Phase
+  /// 12's gas-bumping worker raises on a stuck resubmission.
   maxFeePerGas         String?
   maxPriorityFeePerGas String?
   bumpCount            Int     @default(0)

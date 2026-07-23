@@ -25,6 +25,17 @@ export const envValidationSchema = Joi.object({
     otherwise: Joi.string().optional(),
   }),
 
+  // modules/relayer's signer, but provided unconditionally by CryptoModule (both
+  // signer roles share SIGNER_BACKEND) — required as soon as CryptoModule is wired
+  // in, whether or not modules/relayer itself exists yet.
+  RELAYER_PRIVATE_KEY: Joi.when('SIGNER_BACKEND', {
+    is: 'local',
+    then: Joi.string()
+      .pattern(/^0x[0-9a-fA-F]{64}$/)
+      .required(),
+    otherwise: Joi.string().optional(),
+  }),
+
   // modules/redis, modules/queue
   REDIS_URL: Joi.string()
     .uri({ scheme: ['redis', 'rediss'] })
