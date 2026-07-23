@@ -21,12 +21,10 @@ pnpm --filter @paymaster/api start:dev
 - `src/modules/health/` — liveness endpoint
 - `src/modules/crypto/` — `SignerService` (KMS-swappable signer) + viem client factory
 - `src/modules/redis/` — shared `ioredis` client, used by `RateLimitGuard`
-- `src/modules/queue/` — root BullMQ connection (first real queue lands in the stuck-tx/gas-bumping worker)
+- `src/modules/queue/` — root BullMQ connection (configurable key `prefix` via `BULLMQ_PREFIX`, so parallel e2e suites don't share queue state)
 - `src/modules/prisma/` — `PrismaService` (connect/disconnect lifecycle hooks around the generated client)
 - `src/modules/paymaster/` — `POST /paymaster/sponsor`: `PolicyService` (whitelist + quota) + `PaymasterSigningService` (UserOp hashing/signing) + `PaymasterService` (orchestrates both, persists the `UserOperation` row)
-- `src/modules/relayer/` — `POST /relayer/submit` + `GET /userops/:hash`: `RelayerService` (submits real `handleOps` transactions) + `UserOpStateMachineService` (guards `PENDING → SUBMITTED → CONFIRMED/FAILED` transitions)
-
-`QueueModule` is still standalone (its first real consumer, the stuck-tx/gas-bumping worker, lands later) — every other module is now wired into `AppModule`.
+- `src/modules/relayer/` — `POST /relayer/submit` + `GET /userops/:hash`: `RelayerService` (submits real `handleOps` transactions) + `UserOpStateMachineService` (guards `PENDING → SUBMITTED/STUCK → CONFIRMED/FAILED` transitions) + `ConfirmationCheckProcessor` (BullMQ worker: detects stuck transactions and re-broadcasts with bumped fees)
 
 ## Database (Prisma)
 
@@ -83,6 +81,16 @@ curl http://localhost:5010/userops/0xabc123...
 
 `modules/relayer/relayer.e2e-spec.ts` proves this against a real chain end-to-end: it deploys a real `EntryPoint`, `VerifyingPaymaster`, and eth-infinitism's reference `SimpleAccount` (the only "account" contract in scope here — this project builds the paymaster/relayer side, not a wallet), sponsors and submits a genuine UserOp, and confirms it actually mines.
 
+## Stuck-transaction detection & gas bumping
+
+Every successful `RelayerService.submit()` schedules a delayed BullMQ job (`STUCK_CHECK_DELAY_SECONDS` after broadcast, default 45s) on the `userop-confirmation-check` queue. When `ConfirmationCheckProcessor` picks it up:
+
+- If the transaction has a mined receipt: the state machine moves the op to `CONFIRMED` (or `FAILED` with `failureReason: 'Transaction reverted'` if the receipt's status is `reverted`).
+- If it's still unmined: the op moves to `STUCK`, fees are bumped by `GAS_BUMP_PERCENT` (default 15%) over the last-used values, and `handleOps` is re-broadcast **at the same relayer nonce** — a standard EIP-1559 fee-replacement — so it competes with (and, once mined, replaces) the original attempt. Gas is never re-estimated for a resubmission; `RelayerService.submit()` estimates it once via `estimateContractGas` and persists it as `relayerGasLimit`, because re-estimating while the original transaction is still pending can make `eth_estimateGas` see an inconsistent account nonce and revert with `AA25 invalid account nonce`. A fresh confirmation-check job is scheduled for the new tx hash, and `bumpCount` increments.
+- This repeats until confirmation or until `bumpCount` reaches `MAX_GAS_BUMP_ATTEMPTS` (default 5), at which point the op is marked `FAILED` with a descriptive `failureReason` instead of retrying forever.
+
+`test/gas-bumping.e2e-spec.ts` proves the full recovery cycle against a real chain: it disables Anvil's automine after submission so the first transaction genuinely sits unmined, waits for the worker to detect it as `STUCK` and resubmit with bumped fees, then mines a block and asserts the op lands `CONFIRMED` under the _bumped_ transaction hash (with the original hash's receipt still null).
+
 ## Rate limiting
 
 `RateLimitGuard` enforces an IP tier on every route it's applied to, plus an optional per-wallet tier on routes annotated with `@RateLimitWalletField('sender')` (or a dot path like `'userOp.sender'`):
@@ -102,12 +110,13 @@ Two e2e suites spawn a throwaway Anvil node and deploy real contracts from `cont
 
 - `test/paymaster-onchain.e2e-spec.ts` — deploys `EntryPoint` + `VerifyingPaymaster`, calls the real `/paymaster/sponsor` endpoint, then calls the deployed contract's `validatePaymasterUserOp` directly (impersonating the EntryPoint as caller) to prove the API's signature is genuinely accepted on-chain — and that a tampered UserOp is genuinely rejected.
 - `test/relayer.e2e-spec.ts` — additionally deploys eth-infinitism's reference `SimpleAccount`, sponsors and submits a genuine UserOp through both endpoints, and confirms `handleOps()` actually mines.
+- `test/gas-bumping.e2e-spec.ts` — the same stack again, but with automine disabled so the first submission is forced to sit unmined, proving the `ConfirmationCheckProcessor` worker's automatic `STUCK → SUBMITTED → CONFIRMED` recovery (see [Stuck-transaction detection & gas bumping](#stuck-transaction-detection--gas-bumping)).
 
-Both dynamically `import()` `AppModule` inside `beforeAll`, after overriding `ENTRY_POINT_ADDRESS`/`PAYMASTER_CONTRACT_ADDRESS`/`CHAIN_RPC_URL` in `process.env` — `@Module()` decorators (and therefore `ConfigModule.forRoot()`) run at import time, so a static top-level import would snapshot the stale `.env` values before the override ever runs.
+All three dynamically `import()` `AppModule` inside `beforeAll`, after overriding env vars (`ENTRY_POINT_ADDRESS`/`PAYMASTER_CONTRACT_ADDRESS`/`CHAIN_RPC_URL`, and a suite-unique `BULLMQ_PREFIX` so concurrent e2e runs don't share BullMQ queue state) in `process.env` — `@Module()` decorators (and therefore `ConfigModule.forRoot()`) run at import time, so a static top-level import would snapshot the stale `.env` values before the override ever runs.
 
 ## Testing
 
 ```shell
 pnpm test        # unit tests
-pnpm test:e2e    # e2e tests (boots a full Nest app in-process; rate-limit needs Redis, prisma needs Postgres, paymaster-onchain/relayer need `forge build` + the Foundry toolchain)
+pnpm test:e2e    # e2e tests (boots a full Nest app in-process; rate-limit needs Redis, prisma needs Postgres, paymaster-onchain/relayer/gas-bumping need `forge build` + the Foundry toolchain)
 ```

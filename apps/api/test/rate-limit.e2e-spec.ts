@@ -15,6 +15,14 @@ import { REDIS_CLIENT } from '../src/modules/redis/redis.constants';
 const IP_MAX = 10;
 const WALLET_MAX = 2;
 
+// The IP tier keys on req.ip alone, with no per-suite namespace — and every other
+// e2e file that hits a RateLimitGuard-protected route (POST /paymaster/sponsor) from
+// this same machine shares the same real loopback IP against the same real Redis.
+// Spoofing a fixed, suite-unique X-Forwarded-For (via Express's trust-proxy setting,
+// enabled only on this test's own throwaway app instance) fully decouples this
+// suite's IP-tier counter from whatever other suites are doing concurrently.
+const FAKE_IP = '10.66.77.88';
+
 @Controller('demo')
 class DemoController {
   @Get('ip-limited')
@@ -53,6 +61,7 @@ describe('RateLimitGuard (e2e)', () => {
     }).compile();
 
     app = moduleFixture.createNestApplication();
+    app.getHttpAdapter().getInstance().set('trust proxy', true);
     await app.init();
 
     redis = app.get<Redis>(REDIS_CLIENT);
@@ -62,19 +71,34 @@ describe('RateLimitGuard (e2e)', () => {
     await app.close();
   });
 
+  function getReq(path: string) {
+    return request(app.getHttpServer()).get(path).set('X-Forwarded-For', FAKE_IP);
+  }
+
+  function postReq(path: string) {
+    return request(app.getHttpServer()).post(path).set('X-Forwarded-For', FAKE_IP);
+  }
+
   beforeEach(async () => {
-    // Every route shares the IP tier, so each test gets a clean slate — otherwise
-    // the previous test's requests (and any prior run within the same TTL window)
-    // would carry over and make the IP tier trip before the test under test intends.
-    await redis.flushdb();
+    // Scoped to this suite's own keys only — a full flushdb() here would wipe out
+    // whatever other concurrently-running e2e suites are keeping in the same real
+    // Redis instance (their BullMQ jobs, their own rate-limit counters, etc.). Also
+    // clears the test wallet addresses' counters so repeated local runs within the
+    // same window don't carry over.
+    const keys = await redis.keys(`ratelimit:*${FAKE_IP}*`);
+    keys.push(
+      'ratelimit:wallet:0x1111111111111111111111111111111111111111',
+      'ratelimit:wallet:0x2222222222222222222222222222222222222222',
+    );
+    await redis.del(...keys);
   });
 
   it('allows requests under the IP limit, then 429s past it', async () => {
     for (let i = 0; i < IP_MAX; i++) {
-      await request(app.getHttpServer()).get('/demo/ip-limited').expect(200);
+      await getReq('/demo/ip-limited').expect(200);
     }
 
-    const blocked = await request(app.getHttpServer()).get('/demo/ip-limited').expect(429);
+    const blocked = await getReq('/demo/ip-limited').expect(429);
     expect(blocked.body).toMatchObject({ statusCode: 429, error: 'TooManyRequests' });
   });
 
@@ -83,20 +107,11 @@ describe('RateLimitGuard (e2e)', () => {
     const walletB = '0x2222222222222222222222222222222222222222';
 
     for (let i = 0; i < WALLET_MAX; i++) {
-      await request(app.getHttpServer())
-        .post('/demo/wallet-limited')
-        .send({ sender: walletA })
-        .expect(201);
+      await postReq('/demo/wallet-limited').send({ sender: walletA }).expect(201);
     }
-    await request(app.getHttpServer())
-      .post('/demo/wallet-limited')
-      .send({ sender: walletA })
-      .expect(429);
+    await postReq('/demo/wallet-limited').send({ sender: walletA }).expect(429);
 
     // A different wallet is unaffected by walletA's limit.
-    await request(app.getHttpServer())
-      .post('/demo/wallet-limited')
-      .send({ sender: walletB })
-      .expect(201);
+    await postReq('/demo/wallet-limited').send({ sender: walletB }).expect(201);
   });
 });

@@ -2,6 +2,21 @@ import { ConflictException, Injectable } from '@nestjs/common';
 import { Prisma, UserOpStatus } from '../../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
+export interface MarkSubmittedParams {
+  submittedTxHash: string;
+  relayerNonce: number;
+  maxFeePerGas: bigint;
+  maxPriorityFeePerGas: bigint;
+  /** Only set on the very first submission — estimated once and reused verbatim on
+   *  every resubmission (see schema comment on relayerGasLimit for why). */
+  relayerGasLimit?: bigint;
+  /** Only present on the very first submission — a gas-bumped resubmission reuses
+   *  whatever's already stored, since nothing the account/paymaster signed changes. */
+  signature?: string;
+  /** Set when this call is a gas-bumped resubmission, not the initial submission. */
+  isResubmission?: boolean;
+}
+
 /**
  * Enforces valid transitions through the relayer's state machine:
  *   PENDING -> SUBMITTED -> CONFIRMED
@@ -17,16 +32,29 @@ import { PrismaService } from '../prisma/prisma.service';
 export class UserOpStateMachineService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async markSubmitted(
-    userOpHash: string,
-    params: { submittedTxHash: string; maxFeePerGas: bigint; maxPriorityFeePerGas: bigint },
-  ): Promise<void> {
-    await this.transition(userOpHash, [UserOpStatus.PENDING, UserOpStatus.STUCK], {
+  async markSubmitted(userOpHash: string, params: MarkSubmittedParams): Promise<void> {
+    const data: Prisma.UserOperationUpdateManyMutationInput = {
       status: UserOpStatus.SUBMITTED,
       submittedTxHash: params.submittedTxHash,
+      relayerNonce: params.relayerNonce,
       maxFeePerGas: params.maxFeePerGas.toString(),
       maxPriorityFeePerGas: params.maxPriorityFeePerGas.toString(),
-    });
+    };
+    if (params.signature !== undefined) {
+      data.signature = params.signature;
+    }
+    if (params.relayerGasLimit !== undefined) {
+      data.relayerGasLimit = params.relayerGasLimit.toString();
+    }
+    if (params.isResubmission) {
+      data.bumpCount = { increment: 1 };
+    }
+
+    await this.transition(userOpHash, [UserOpStatus.PENDING, UserOpStatus.STUCK], data);
+  }
+
+  async markStuck(userOpHash: string): Promise<void> {
+    await this.transition(userOpHash, [UserOpStatus.SUBMITTED], { status: UserOpStatus.STUCK });
   }
 
   async markConfirmed(

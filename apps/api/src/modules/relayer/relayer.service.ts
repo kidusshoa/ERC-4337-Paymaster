@@ -1,32 +1,39 @@
+import { InjectQueue } from '@nestjs/bullmq';
 import {
   ConflictException,
   Inject,
   Injectable,
-  Logger,
   NotFoundException,
   OnModuleInit,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { Queue } from 'bullmq';
 import { Address, Hex, LocalAccount } from 'viem';
+import { UserOperation } from '../../../generated/prisma/client';
+import { createSignerAccount } from '../crypto/signer-account.util';
 import { RELAYER_SIGNER_SERVICE, SignerService } from '../crypto/signer.interface';
 import { ViemClientService } from '../crypto/viem-client.service';
-import { createSignerAccount } from '../crypto/signer-account.util';
-import { UserOperation } from '../../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { packAccountGasLimits, packGasFees } from '../paymaster/signing/packed-user-op.util';
-import { ENTRY_POINT_ABI } from './entry-point.abi';
+import { buildPackedUserOp } from './build-packed-user-op.util';
 import { UserOpStatusResponseDto } from './dto/userop-status-response.dto';
+import { ENTRY_POINT_ABI } from './entry-point.abi';
+import {
+  CONFIRMATION_CHECK_JOB,
+  CONFIRMATION_CHECK_QUEUE,
+  ConfirmationCheckJobData,
+} from './queue/confirmation-check.queue';
 import { UserOpStateMachineService } from './user-op-state-machine.service';
 
 /**
  * Submits fully-signed UserOperations to the real EntryPoint (this backend acting as
  * its own bundler for the ops it sponsors) and tracks them through
- * UserOpStateMachineService. Confirmation is watched in the background — submit()
- * returns as soon as the transaction is broadcast, matching how a real bundler API
- * behaves, rather than blocking the HTTP response on mining.
+ * UserOpStateMachineService. submit() returns as soon as the transaction is
+ * broadcast, matching how a real bundler API behaves; ConfirmationCheckProcessor
+ * (a delayed BullMQ job) takes over from there, including detecting "stuck" and
+ * bumping gas.
  */
 @Injectable()
 export class RelayerService implements OnModuleInit {
-  private readonly logger = new Logger(RelayerService.name);
   private relayerAccount!: LocalAccount;
 
   constructor(
@@ -34,6 +41,8 @@ export class RelayerService implements OnModuleInit {
     private readonly viemClientService: ViemClientService,
     private readonly prisma: PrismaService,
     private readonly stateMachine: UserOpStateMachineService,
+    private readonly configService: ConfigService,
+    @InjectQueue(CONFIRMATION_CHECK_QUEUE) private readonly queue: Queue<ConfirmationCheckJobData>,
   ) {}
 
   async onModuleInit() {
@@ -51,53 +60,53 @@ export class RelayerService implements OnModuleInit {
       );
     }
 
-    const userOp = {
-      sender: row.sender as Address,
-      nonce: BigInt(row.nonce),
-      initCode: row.initCode as Hex,
-      callData: row.callData as Hex,
-      accountGasLimits: packAccountGasLimits({
-        verificationGasLimit: BigInt(row.verificationGasLimit),
-        callGasLimit: BigInt(row.callGasLimit),
-      }),
-      preVerificationGas: BigInt(row.preVerificationGas),
-      gasFees: packGasFees({
-        maxPriorityFeePerGas: BigInt(row.opMaxPriorityFeePerGas),
-        maxFeePerGas: BigInt(row.opMaxFeePerGas),
-      }),
-      paymasterAndData: row.paymasterAndData as Hex,
-      signature: signature as Hex,
-    };
+    const userOp = buildPackedUserOp(row, signature as Hex);
 
     const publicClient = this.viemClientService.getPublicClient();
     const walletClient = this.viemClientService.getWalletClient(this.relayerAccount);
-    const { maxFeePerGas, maxPriorityFeePerGas } = await publicClient.estimateFeesPerGas();
-
-    const txHash = await walletClient.writeContract({
-      chain: this.viemClientService.getChain(),
-      account: this.relayerAccount,
+    const handleOpsCall = {
       address: row.entryPoint as Address,
       abi: ENTRY_POINT_ABI,
-      functionName: 'handleOps',
-      args: [[userOp], this.relayerAccount.address],
+      functionName: 'handleOps' as const,
+      args: [[userOp], this.relayerAccount.address] as const,
+    };
+
+    const [{ maxFeePerGas, maxPriorityFeePerGas }, relayerNonce, estimatedGas] = await Promise.all([
+      publicClient.estimateFeesPerGas(),
+      publicClient.getTransactionCount({
+        address: this.relayerAccount.address,
+        blockTag: 'pending',
+      }),
+      publicClient.estimateContractGas({ ...handleOpsCall, account: this.relayerAccount }),
+    ]);
+    // Estimated once here and reused as-is on every gas-bumped resubmission — see
+    // the relayerGasLimit column comment in schema.prisma for why that matters.
+    const relayerGasLimit = (estimatedGas * 120n) / 100n;
+
+    const txHash = await walletClient.writeContract({
+      ...handleOpsCall,
+      chain: this.viemClientService.getChain(),
+      account: this.relayerAccount,
+      nonce: relayerNonce,
+      gas: relayerGasLimit,
       maxFeePerGas,
       maxPriorityFeePerGas,
     });
 
     await this.stateMachine.markSubmitted(userOpHash, {
       submittedTxHash: txHash,
+      relayerNonce,
+      relayerGasLimit,
       maxFeePerGas,
       maxPriorityFeePerGas,
+      signature,
     });
 
-    // Fire-and-forget: don't block the response on mining. Phase 12 replaces this
-    // with a BullMQ delayed job that also detects "stuck" and bumps gas; for now a
-    // failure here just leaves the row at SUBMITTED; that's still an accurate status.
-    this.watchForConfirmation(userOpHash, txHash).catch((err) =>
-      this.logger.error(
-        `Failed to watch confirmation for ${userOpHash}`,
-        err instanceof Error ? err.stack : err,
-      ),
+    const delaySeconds = this.configService.get<number>('STUCK_CHECK_DELAY_SECONDS', 45);
+    await this.queue.add(
+      CONFIRMATION_CHECK_JOB,
+      { userOpHash, txHash },
+      { delay: delaySeconds * 1000 },
     );
 
     const updated = await this.prisma.userOperation.findUniqueOrThrow({ where: { userOpHash } });
@@ -110,27 +119,6 @@ export class RelayerService implements OnModuleInit {
       throw new NotFoundException(`No UserOperation found for hash ${userOpHash}`);
     }
     return this.toStatusResponse(row);
-  }
-
-  private async watchForConfirmation(userOpHash: string, txHash: Hex): Promise<void> {
-    const publicClient = this.viemClientService.getPublicClient();
-
-    try {
-      const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
-      if (receipt.status === 'success') {
-        await this.stateMachine.markConfirmed(userOpHash, {
-          blockNumber: receipt.blockNumber,
-          gasUsed: receipt.gasUsed,
-        });
-      } else {
-        await this.stateMachine.markFailed(userOpHash, 'Transaction reverted');
-      }
-    } catch (err) {
-      await this.stateMachine.markFailed(
-        userOpHash,
-        err instanceof Error ? err.message : 'Unknown error',
-      );
-    }
   }
 
   private toStatusResponse(row: UserOperation): UserOpStatusResponseDto {

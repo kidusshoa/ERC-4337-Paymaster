@@ -125,6 +125,9 @@ describe('Paymaster on-chain validation proof (e2e)', () => {
     // set before AppModule (and its ConfigModule) is even imported, see file header.
     process.env.ENTRY_POINT_ADDRESS = entryPointAddress;
     process.env.PAYMASTER_CONTRACT_ADDRESS = paymasterAddress;
+    // Isolates this file's BullMQ worker from every other AppModule-booting e2e
+    // file's confirmation-check queue (see queue.module.ts's doc comment).
+    process.env.BULLMQ_PREFIX = 'test-paymaster-onchain';
 
     const { AppModule } = await import('../src/app.module');
     const moduleFixture: TestingModule = await Test.createTestingModule({

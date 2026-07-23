@@ -2,7 +2,6 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import request from 'supertest';
 import { recoverAddress, hashMessage } from 'viem';
-import { AppModule } from '../src/app.module';
 import { computePaymasterHash } from '../src/modules/paymaster/signing/packed-user-op.util';
 import { PrismaService } from '../src/modules/prisma/prisma.service';
 
@@ -37,6 +36,10 @@ describe('POST /paymaster/sponsor (e2e)', () => {
   const createdPolicyIds: string[] = [];
 
   beforeAll(async () => {
+    // See health.e2e-spec.ts's comment on why: isolates this file's BullMQ worker
+    // from every other AppModule-booting e2e file's confirmation-check queue.
+    process.env.BULLMQ_PREFIX = 'test-paymaster';
+    const { AppModule } = await import('../src/app.module');
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
     }).compile();

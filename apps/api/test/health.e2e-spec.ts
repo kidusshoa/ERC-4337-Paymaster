@@ -1,12 +1,18 @@
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import request from 'supertest';
-import { AppModule } from '../src/app.module';
 
 describe('Health (e2e)', () => {
   let app: INestApplication;
 
   beforeAll(async () => {
+    // Every AppModule-booting e2e file needs its own BullMQ key namespace — RelayerModule's
+    // ConfirmationCheckProcessor worker is always live, and workers on the same queue name
+    // compete for jobs across files even when a given file never enqueues one itself.
+    // AppModule is imported dynamically (after this env var is set) since @Module()
+    // decorators run at import time.
+    process.env.BULLMQ_PREFIX = 'test-health';
+    const { AppModule } = await import('../src/app.module');
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
     }).compile();

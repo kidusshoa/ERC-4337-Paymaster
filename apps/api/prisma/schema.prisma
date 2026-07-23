@@ -76,6 +76,16 @@ model UserOperation {
   policy   SponsorshipPolicy? @relation(fields: [policyId], references: [id])
 
   submittedTxHash      String?
+  /// The relayer EOA's own Ethereum nonce for the outer handleOps transaction —
+  /// needed so a stuck resubmission reuses the exact same nonce (an EIP-1559
+  /// replacement, not a brand-new transaction).
+  relayerNonce         Int?
+  /// Gas limit for the outer handleOps transaction, estimated once at initial
+  /// submission and reused as-is on every resubmission — re-estimating against a
+  /// still-pending same-nonce transaction confuses simulation (observed as a
+  /// spurious "AA25 invalid account nonce" revert), and the intrinsic gas an op
+  /// needs doesn't change just because its gas *price* is being bumped.
+  relayerGasLimit      String?
   /// Gas price of the relayer's own *outer* transaction submitting handleOps —
   /// distinct from opMaxFeePerGas/opMaxPriorityFeePerGas above; this is what Phase
   /// 12's gas-bumping worker raises on a stuck resubmission.

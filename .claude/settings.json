@@ -67,7 +67,14 @@
       "Bash(pkill -9 -f \"anvil --port 8549\")",
       "Bash(forge test *)",
       "Bash(pnpm test:e2e -- user-op-state-machine)",
-      "Bash(pnpm test:e2e -- relayer)"
+      "Bash(pnpm test:e2e -- relayer)",
+      "Bash(pnpm test:e2e -- gas-bumping)",
+      "Bash(kill -9 72082)",
+      "Bash(kill -9 73488)",
+      "Bash(pnpm test:e2e -- paymaster.e2e-spec)",
+      "Bash(sysctl -n hw.ncpu)",
+      "Bash(tee /tmp/final-unit.log)",
+      "Bash(echo \"EXIT:$?\")"
     ]
   }
 }

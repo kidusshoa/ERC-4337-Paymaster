@@ -40,6 +40,10 @@ export const envValidationSchema = Joi.object({
   REDIS_URL: Joi.string()
     .uri({ scheme: ['redis', 'rediss'] })
     .default('redis://127.0.0.1:6379'),
+  // Namespaces BullMQ's Redis keys — distinct e2e test suites override this to their
+  // own value so their workers never compete for each other's jobs (see
+  // queue.module.ts's doc comment).
+  BULLMQ_PREFIX: Joi.string().min(1).default('bullmq'),
 
   // common/guards/rate-limit.guard
   RATE_LIMIT_IP_MAX: Joi.number().integer().positive().default(50),
@@ -58,4 +62,9 @@ export const envValidationSchema = Joi.object({
   PAYMASTER_VERIFICATION_GAS_LIMIT: Joi.number().integer().min(0).default(100_000),
   PAYMASTER_POSTOP_GAS_LIMIT: Joi.number().integer().min(0).default(0),
   SPONSOR_VALID_SECONDS: Joi.number().integer().positive().default(180),
+
+  // modules/relayer's gas-bumping worker
+  STUCK_CHECK_DELAY_SECONDS: Joi.number().integer().positive().default(45),
+  GAS_BUMP_PERCENT: Joi.number().integer().positive().default(15),
+  MAX_GAS_BUMP_ATTEMPTS: Joi.number().integer().positive().default(5),
 });

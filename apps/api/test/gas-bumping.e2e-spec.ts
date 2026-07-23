@@ -9,12 +9,14 @@ import request from 'supertest';
 import {
   Address,
   createPublicClient,
+  createTestClient,
   createWalletClient,
   encodeFunctionData,
   hashMessage,
   Hex,
   http,
   parseEther,
+  publicActions,
   PublicClient,
 } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
@@ -22,20 +24,19 @@ import { foundry } from 'viem/chains';
 import { PrismaService } from '../src/modules/prisma/prisma.service';
 
 /**
- * Full-stack proof of Phase 11: sponsors a real UserOp for a real, deployed
- * SimpleAccount (eth-infinitism's reference account — the only "account" contract
- * this build needs, since our own scope is the paymaster/relayer, not a wallet
- * implementation), has the account "owner" sign it, submits it through
- * POST /relayer/submit, and confirms the resulting handleOps() transaction actually
- * lands on-chain — the state machine's PENDING -> SUBMITTED -> CONFIRMED path
- * observed against a real chain, not mocked.
+ * Forces a genuinely stuck transaction (Anvil auto-mining disabled) and proves
+ * ConfirmationCheckProcessor recovers automatically: SUBMITTED -> STUCK (no receipt
+ * within the delay window) -> resubmitted with bumped fees at the *same relayer
+ * nonce* -> SUBMITTED again -> CONFIRMED once a block is finally mined. This is
+ * Phase 12's actual done-criteria — the happy path is already covered by
+ * relayer.e2e-spec.ts.
  *
- * Requires `forge build` in contracts/ (reads its compiled artifacts) and Foundry
- * installed (spawns a throwaway Anvil). AppModule is imported dynamically after the
- * env overrides below — see paymaster-onchain.e2e-spec.ts's header comment for why.
+ * Requires `forge build` in contracts/ and the Foundry toolchain. AppModule is
+ * imported dynamically after the env overrides — see paymaster-onchain.e2e-spec.ts's
+ * header comment for why.
  */
 
-const ANVIL_PORT = 8551;
+const ANVIL_PORT = 8553;
 const ANVIL_RPC_URL = `http://127.0.0.1:${ANVIL_PORT}`;
 const CONTRACTS_OUT = join(__dirname, '..', '..', '..', 'contracts', 'out');
 
@@ -71,11 +72,25 @@ async function waitForAnvil(publicClient: PublicClient, attempts = 40): Promise<
   throw new Error('Anvil did not become ready in time');
 }
 
-describe('Relayer submission (e2e)', () => {
+async function pollUntil(
+  check: () => Promise<boolean>,
+  { attempts = 50, intervalMs = 200 }: { attempts?: number; intervalMs?: number } = {},
+): Promise<void> {
+  for (let i = 0; i < attempts; i++) {
+    if (await check()) return;
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+  throw new Error(
+    `Condition not met after ${attempts} attempts (${(attempts * intervalMs) / 1000}s)`,
+  );
+}
+
+describe('Gas-bumping worker (e2e)', () => {
   let anvil: ChildProcess;
   let app: INestApplication;
   let prisma: PrismaService;
   let publicClient: PublicClient;
+  let testClient: ReturnType<typeof createTestClient> & ReturnType<typeof publicActions>;
   let entryPointAddress: Address;
   let paymasterAddress: Address;
   let accountAddress: Address;
@@ -86,6 +101,11 @@ describe('Relayer submission (e2e)', () => {
     });
     publicClient = createPublicClient({ chain: foundry, transport: http(ANVIL_RPC_URL) });
     await waitForAnvil(publicClient);
+    testClient = createTestClient({
+      chain: foundry,
+      mode: 'anvil',
+      transport: http(ANVIL_RPC_URL),
+    }).extend(publicActions);
 
     const deployer = privateKeyToAccount(DEPLOYER_PRIVATE_KEY);
     const walletClient = createWalletClient({
@@ -115,8 +135,6 @@ describe('Relayer submission (e2e)', () => {
     paymasterAddress = (await publicClient.waitForTransactionReceipt({ hash: paymasterDeployTx }))
       .contractAddress as Address;
 
-    // handleOps charges the paymaster's EntryPoint deposit for the op's gas — needs
-    // a real balance there, unlike Phase 10's single validatePaymasterUserOp call.
     const depositTx = await walletClient.writeContract({
       address: paymasterAddress,
       abi: paymasterArtifact.abi,
@@ -137,10 +155,6 @@ describe('Relayer submission (e2e)', () => {
       .contractAddress as Address;
 
     const ownerAddress = privateKeyToAccount(ACCOUNT_OWNER_PRIVATE_KEY).address;
-    // Random salt so the resulting CREATE2 account address — and therefore its
-    // wallet-tier rate-limit identity in the real, persistent Redis instance other
-    // e2e suites also share — is fresh on every run, not a fixed address that
-    // accumulates quota usage across repeated local test runs.
     const salt = BigInt(Math.floor(Math.random() * 1_000_000_000));
     const createAccountTx = await walletClient.writeContract({
       address: factoryAddress,
@@ -156,20 +170,17 @@ describe('Relayer submission (e2e)', () => {
       args: [ownerAddress, salt],
     })) as Address;
 
-    // The running app must sign/submit against these exact freshly-deployed
-    // addresses, and — unlike Phase 10, which never dials the chain — actually
-    // broadcast to *this* Anvil, not the default CHAIN_RPC_URL from .env. All set
-    // before AppModule (and its ConfigModule) is even imported.
     process.env.ENTRY_POINT_ADDRESS = entryPointAddress;
     process.env.PAYMASTER_CONTRACT_ADDRESS = paymasterAddress;
     process.env.CHAIN_RPC_URL = ANVIL_RPC_URL;
     // Isolates this file's BullMQ worker from every other AppModule-booting e2e
     // file's confirmation-check queue (see queue.module.ts's doc comment).
-    process.env.BULLMQ_PREFIX = 'test-relayer';
-    // This suite exercises the happy path (prompt confirmation), not the stuck/bump
-    // path (that's gas-bumping.e2e-spec.ts) — a short delay means the
-    // confirmation-check job fires quickly instead of waiting the real default 45s.
-    process.env.STUCK_CHECK_DELAY_SECONDS = '1';
+    process.env.BULLMQ_PREFIX = 'test-gas-bumping';
+    // Short enough that the test doesn't take real minutes, long enough to
+    // reliably outlast the setup calls above (which all rely on automine).
+    process.env.STUCK_CHECK_DELAY_SECONDS = '2';
+    process.env.GAS_BUMP_PERCENT = '20';
+    process.env.MAX_GAS_BUMP_ATTEMPTS = '5';
 
     const { AppModule } = await import('../src/app.module');
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -189,9 +200,8 @@ describe('Relayer submission (e2e)', () => {
     }
   });
 
-  it('sponsors, signs, submits, and confirms a real UserOp end-to-end', async () => {
+  it('recovers a stuck transaction automatically: SUBMITTED -> STUCK -> SUBMITTED (bumped) -> CONFIRMED', async () => {
     const simpleAccountArtifact = loadArtifact(join('SimpleAccount.sol', 'SimpleAccount.json'));
-    // A harmless no-op call: execute(address(0), 0, "0x").
     const callData = encodeFunctionData({
       abi: simpleAccountArtifact.abi,
       functionName: 'execute',
@@ -216,85 +226,56 @@ describe('Relayer submission (e2e)', () => {
       .expect(200);
 
     const { userOpHash } = sponsorResponse.body;
-    expect(userOpHash).toMatch(/^0x[0-9a-f]{64}$/i);
-
-    // The account owner signs userOpHash — exactly what SimpleAccount._validateSignature checks.
     const ownerAccount = privateKeyToAccount(ACCOUNT_OWNER_PRIVATE_KEY);
     const signature = await ownerAccount.sign({ hash: hashMessage({ raw: userOpHash as Hex }) });
+
+    // Disable automining *after* all setup transactions above already landed —
+    // this submission's handleOps tx will sit in the mempool, genuinely unmined.
+    await testClient.setAutomine(false);
 
     const submitResponse = await request(app.getHttpServer())
       .post('/relayer/submit')
       .send({ userOpHash, signature })
       .expect(200);
-
     expect(submitResponse.body.status).toBe('SUBMITTED');
-    expect(submitResponse.body.submittedTxHash).toMatch(/^0x[0-9a-f]{64}$/i);
+    const firstTxHash = submitResponse.body.submittedTxHash;
 
-    let status = submitResponse.body.status;
-    for (
-      let attempt = 0;
-      attempt < 50 && status !== 'CONFIRMED' && status !== 'FAILED';
-      attempt++
-    ) {
-      await new Promise((resolve) => setTimeout(resolve, 200));
+    // Wait for ConfirmationCheckProcessor to detect it's not mined, mark STUCK, and
+    // resubmit with bumped fees — observed as bumpCount incrementing and a new
+    // submittedTxHash (same relayer nonce, higher fee) replacing the original.
+    await pollUntil(
+      async () => {
+        const row = await prisma.userOperation.findUniqueOrThrow({ where: { userOpHash } });
+        return row.bumpCount >= 1 && row.submittedTxHash !== firstTxHash;
+      },
+      { attempts: 60, intervalMs: 200 },
+    );
+
+    const stuckRow = await prisma.userOperation.findUniqueOrThrow({ where: { userOpHash } });
+    expect(stuckRow.bumpCount).toBeGreaterThanOrEqual(1);
+    expect(stuckRow.status).toBe('SUBMITTED');
+    expect(BigInt(stuckRow.maxFeePerGas!)).toBeGreaterThan(2_000_000_000n);
+    const bumpedTxHash = stuckRow.submittedTxHash;
+
+    // Now let a block through — the bumped (replacement) transaction should mine.
+    await testClient.mine({ blocks: 1 });
+
+    await pollUntil(async () => {
       const statusResponse = await request(app.getHttpServer())
         .get(`/userops/${userOpHash}`)
         .expect(200);
-      status = statusResponse.body.status;
-    }
-
-    expect(status).toBe('CONFIRMED');
-
-    const row = await prisma.userOperation.findUniqueOrThrow({ where: { userOpHash } });
-    expect(row.blockNumber).not.toBeNull();
-    expect(row.gasUsed).not.toBeNull();
-  }, 20_000);
-
-  it('rejects submitting the same UserOp twice (no longer PENDING)', async () => {
-    const callData = encodeFunctionData({
-      abi: loadArtifact(join('SimpleAccount.sol', 'SimpleAccount.json')).abi,
-      functionName: 'execute',
-      args: ['0x0000000000000000000000000000000000000000', 0n, '0x'],
+      return statusResponse.body.status === 'CONFIRMED' || statusResponse.body.status === 'FAILED';
     });
 
-    const sponsorResponse = await request(app.getHttpServer())
-      .post('/paymaster/sponsor')
-      .send({
-        sender: accountAddress,
-        nonce: '1',
-        initCode: '0x',
-        callData,
-        callGasLimit: '100000',
-        verificationGasLimit: '150000',
-        preVerificationGas: '50000',
-        maxFeePerGas: '2000000000',
-        maxPriorityFeePerGas: '1000000000',
-        targetContract: '0xdead0000dead0000dead0000dead0000dead0000',
-        selector: '0xa9059cbb',
-      })
-      .expect(200);
+    const finalRow = await prisma.userOperation.findUniqueOrThrow({ where: { userOpHash } });
+    expect(finalRow.status).toBe('CONFIRMED');
+    expect(finalRow.submittedTxHash).toBe(bumpedTxHash);
+    expect(finalRow.blockNumber).not.toBeNull();
 
-    const { userOpHash } = sponsorResponse.body;
-    const ownerAccount = privateKeyToAccount(ACCOUNT_OWNER_PRIVATE_KEY);
-    const signature = await ownerAccount.sign({ hash: hashMessage({ raw: userOpHash as Hex }) });
-
-    await request(app.getHttpServer())
-      .post('/relayer/submit')
-      .send({ userOpHash, signature })
-      .expect(200);
-
-    await request(app.getHttpServer())
-      .post('/relayer/submit')
-      .send({ userOpHash, signature })
-      .expect(409);
-  });
-
-  it('404s on an unknown userOpHash', async () => {
-    const unknown = `0x${'ab'.repeat(32)}`;
-    await request(app.getHttpServer()).get(`/userops/${unknown}`).expect(404);
-    await request(app.getHttpServer())
-      .post('/relayer/submit')
-      .send({ userOpHash: unknown, signature: `0x${'11'.repeat(65)}` })
-      .expect(404);
-  });
+    // The original (stuck) transaction never confirmed — only the bumped replacement did.
+    const originalReceipt = await publicClient
+      .getTransactionReceipt({ hash: firstTxHash as Hex })
+      .catch(() => null);
+    expect(originalReceipt).toBeNull();
+  }, 30_000);
 });

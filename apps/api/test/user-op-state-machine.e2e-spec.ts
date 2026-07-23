@@ -54,6 +54,7 @@ describe('UserOpStateMachineService (integration)', () => {
     const hash = await createPendingOp('submit');
     await stateMachine.markSubmitted(hash, {
       submittedTxHash: '0xtx1',
+      relayerNonce: 0,
       maxFeePerGas: 2_000_000_000n,
       maxPriorityFeePerGas: 1_000_000_000n,
     });
@@ -106,9 +107,73 @@ describe('UserOpStateMachineService (integration)', () => {
     await expect(
       stateMachine.markSubmitted(hash, {
         submittedTxHash: '0xtx2',
+        relayerNonce: 0,
         maxFeePerGas: 1n,
         maxPriorityFeePerGas: 1n,
       }),
     ).rejects.toThrow();
+  });
+
+  it('moves SUBMITTED -> STUCK', async () => {
+    const hash = await createPendingOp('stuck', UserOpStatus.SUBMITTED);
+    await stateMachine.markStuck(hash);
+
+    const row = await prisma.userOperation.findUniqueOrThrow({ where: { userOpHash: hash } });
+    expect(row.status).toBe(UserOpStatus.STUCK);
+  });
+
+  it('rejects marking PENDING as STUCK (only a SUBMITTED op can go stuck)', async () => {
+    const hash = await createPendingOp('invalid-stuck');
+    await expect(stateMachine.markStuck(hash)).rejects.toThrow();
+  });
+
+  it('increments bumpCount and persists relayerGasLimit on a gas-bumped resubmission', async () => {
+    const hash = await createPendingOp('bump', UserOpStatus.STUCK);
+
+    await stateMachine.markSubmitted(hash, {
+      submittedTxHash: '0xtx-bumped-1',
+      relayerNonce: 3,
+      relayerGasLimit: 250_000n,
+      maxFeePerGas: 2_400_000_000n,
+      maxPriorityFeePerGas: 1_200_000_000n,
+      isResubmission: true,
+    });
+
+    let row = await prisma.userOperation.findUniqueOrThrow({ where: { userOpHash: hash } });
+    expect(row.status).toBe(UserOpStatus.SUBMITTED);
+    expect(row.bumpCount).toBe(1);
+    expect(row.relayerGasLimit).toBe('250000');
+    expect(row.maxFeePerGas).toBe('2400000000');
+
+    // A second bump on the same op increments further.
+    await stateMachine.markStuck(hash);
+    await stateMachine.markSubmitted(hash, {
+      submittedTxHash: '0xtx-bumped-2',
+      relayerNonce: 3,
+      maxFeePerGas: 2_880_000_000n,
+      maxPriorityFeePerGas: 1_440_000_000n,
+      isResubmission: true,
+    });
+
+    row = await prisma.userOperation.findUniqueOrThrow({ where: { userOpHash: hash } });
+    expect(row.bumpCount).toBe(2);
+    expect(row.submittedTxHash).toBe('0xtx-bumped-2');
+  });
+
+  it('does not touch bumpCount or signature on the initial submission', async () => {
+    const hash = await createPendingOp('initial-submit-fields');
+    await stateMachine.markSubmitted(hash, {
+      submittedTxHash: '0xtx-initial',
+      relayerNonce: 0,
+      relayerGasLimit: 200_000n,
+      maxFeePerGas: 1n,
+      maxPriorityFeePerGas: 1n,
+      signature: '0xdeadbeef',
+    });
+
+    const row = await prisma.userOperation.findUniqueOrThrow({ where: { userOpHash: hash } });
+    expect(row.bumpCount).toBe(0);
+    expect(row.signature).toBe('0xdeadbeef');
+    expect(row.relayerGasLimit).toBe('200000');
   });
 });
