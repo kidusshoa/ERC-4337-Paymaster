@@ -181,5 +181,9 @@ All three dynamically `import()` `AppModule` inside `beforeAll`, after overridin
 
 ```shell
 pnpm test        # unit tests
-pnpm test:e2e    # e2e tests (boots a full Nest app in-process; rate-limit needs Redis, prisma needs Postgres, paymaster-onchain/relayer/gas-bumping need `forge build` + the Foundry toolchain)
+pnpm test:e2e    # e2e tests (boots a full Nest app in-process; rate-limit needs Redis, prisma needs Postgres, paymaster-onchain/relayer/gas-bumping/admin need `forge build` + the Foundry toolchain)
 ```
+
+## Demo script
+
+`scripts/demo.ts` (`pnpm demo`) runs the full sponsor → sign → submit → confirm cycle against an **already-running** stack (`docker compose up -d --build` from the repo root, or the local dev setup above) purely over HTTP + the chain — no NestJS internals involved, exactly like a real integrator would use this API. It deploys its own throwaway `SimpleAccountFactory`/`SimpleAccount` (reusing Anvil's well-known account #3 as the owner), discovers the live `EntryPoint` address via `GET /admin/paymaster-status` (so there's no address to hand-copy out of logs), and prints every step. Requires `forge build` in `contracts/` first. See the root [README.md](../../README.md) for the full walkthrough.

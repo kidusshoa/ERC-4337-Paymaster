@@ -13,7 +13,8 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
-    "test:e2e": "jest --config ./test/jest-e2e.json --maxWorkers=4"
+    "test:e2e": "jest --config ./test/jest-e2e.json --maxWorkers=4",
+    "demo": "ts-node scripts/demo.ts"
   },
   "jest": {
     "moduleFileExtensions": [

@@ -1,5 +1,5 @@
 import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post } from '@nestjs/common';
-import { ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { ApiBody, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { SubmitUserOpDto } from './dto/submit-userop.dto';
 import { UserOpStatusResponseDto } from './dto/userop-status-response.dto';
 import { RelayerService } from './relayer.service';
@@ -18,6 +18,7 @@ export class RelayerController {
       'userOpHash and the account signature are needed. Returns immediately once broadcast; poll ' +
       'GET /userops/:hash for confirmation.',
   })
+  @ApiBody({ type: SubmitUserOpDto })
   @ApiResponse({
     status: 200,
     description: 'Broadcast — status SUBMITTED',

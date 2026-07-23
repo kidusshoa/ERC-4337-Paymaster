@@ -3,6 +3,7 @@
   "private": true,
   "version": "0.0.1",
   "description": "ERC-4337 Verifying Paymaster & Gas Relayer — monorepo root",
+  "license": "MIT",
   "engines": {
     "node": ">=20",
     "pnpm": ">=9"
@@ -11,6 +12,7 @@
     "lint": "pnpm -r --if-present run lint",
     "format": "prettier --write \"**/*.{ts,js,json,md}\" --ignore-unknown",
     "format:check": "prettier --check \"**/*.{ts,js,json,md}\" --ignore-unknown",
+    "demo": "pnpm --filter @paymaster/api demo",
     "prepare": "husky"
   },
   "devDependencies": {

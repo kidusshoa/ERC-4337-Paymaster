@@ -24,8 +24,20 @@ async function bootstrap() {
 
   const swaggerConfig = new DocumentBuilder()
     .setTitle('ERC-4337 Paymaster & Gas Relayer API')
-    .setDescription('Sponsors gas for ERC-4337 UserOperations and relays them to the EntryPoint.')
+    .setDescription(
+      'Sponsors gas for ERC-4337 UserOperations (EntryPoint v0.7) and relays them on-chain.\n\n' +
+        'Typical flow: `POST /paymaster/sponsor` (checks policy/quota, returns signed ' +
+        '`paymasterAndData` + `userOpHash`) → the account owner signs that hash → ' +
+        '`POST /relayer/submit` (broadcasts `handleOps`, watches for confirmation, auto-recovers ' +
+        "stuck transactions) → poll `GET /userops/:hash` for status. See the repo's root README " +
+        'for a full walkthrough and architecture overview.',
+    )
     .setVersion('0.0.1')
+    .setLicense('MIT', 'https://opensource.org/licenses/MIT')
+    .addTag('health', 'Liveness check')
+    .addTag('paymaster', 'Policy/quota-checked gas sponsorship')
+    .addTag('relayer', 'UserOperation submission and status tracking')
+    .addTag('admin', 'Operational monitoring (deposit/stake), gated by an API key')
     .addApiKey({ type: 'apiKey', name: ADMIN_API_KEY_HEADER, in: 'header' }, ADMIN_API_KEY_HEADER)
     .build();
   const swaggerDocument = SwaggerModule.createDocument(app, swaggerConfig);
