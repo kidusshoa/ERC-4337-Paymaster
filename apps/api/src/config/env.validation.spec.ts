@@ -83,4 +83,28 @@ describe('envValidationSchema', () => {
     });
     expect(error).toBeDefined();
   });
+
+  it('leaves ADMIN_API_KEY unset by default (the admin endpoint stays disabled)', () => {
+    const { error, value } = envValidationSchema.validate(VALID_BASE_ENV);
+    expect(error).toBeUndefined();
+    expect(value.ADMIN_API_KEY).toBeUndefined();
+  });
+
+  it('rejects an ADMIN_API_KEY shorter than 16 characters', () => {
+    const { error } = envValidationSchema.validate({ ...VALID_BASE_ENV, ADMIN_API_KEY: 'short' });
+    expect(error).toBeDefined();
+  });
+
+  it('defaults PAYMASTER_LOW_BALANCE_THRESHOLD_WEI to 0.05 ETH in wei', () => {
+    const { value } = envValidationSchema.validate(VALID_BASE_ENV);
+    expect(value.PAYMASTER_LOW_BALANCE_THRESHOLD_WEI).toBe('50000000000000000');
+  });
+
+  it('rejects a non-numeric PAYMASTER_LOW_BALANCE_THRESHOLD_WEI', () => {
+    const { error } = envValidationSchema.validate({
+      ...VALID_BASE_ENV,
+      PAYMASTER_LOW_BALANCE_THRESHOLD_WEI: '0.05',
+    });
+    expect(error).toBeDefined();
+  });
 });

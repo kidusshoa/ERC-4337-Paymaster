@@ -25,3 +25,11 @@ Full sponsor→submit→confirm walkthrough: [apps/api/README.md](apps/api/READM
 - `apps/dashboard/` — reserved, not yet built
 
 A full architecture write-up and repo tour lands in a later phase; each package's own README is the current source of truth in the meantime.
+
+## Security checklist (before running anywhere but your own machine)
+
+- **Every private key committed to this repo is a publicly-known Anvil test key** (`DEPLOYER_PRIVATE_KEY`, `SIGNER_PRIVATE_KEY`, `RELAYER_PRIVATE_KEY` in `.env.example`/`docker-compose.yml`/CI) — deterministic from Anvil's default test mnemonic, the same ones every Foundry project uses locally. Never fund or reuse any of them on a network with real value.
+- **Rotate `SIGNER_PRIVATE_KEY`/`RELAYER_PRIVATE_KEY` for anything real.** Both are placeholders behind the `SIGNER_SERVICE`/`RELAYER_SIGNER_SERVICE` abstraction (`modules/crypto`) specifically so a KMS-backed signer is a drop-in swap later — see `signer.factory.ts`.
+- **Set a real `ADMIN_API_KEY`** (`openssl rand -hex 32`) before exposing `GET /admin/paymaster-status` beyond local Docker Compose — see [apps/api/README.md#admin-paymaster-depositstake-monitoring](apps/api/README.md#admin-paymaster-depositstake-monitoring). Leaving it unset disables the endpoint (503) rather than leaving it open.
+- **Configure `trust proxy` correctly if you put the API behind a reverse proxy** — see [apps/api/README.md#rate-limiting](apps/api/README.md#rate-limiting). The default (unset) is safe but wrong behind a proxy; `true`/`'*'` is unsafe everywhere.
+- **`.env` files are gitignored** (`.env.example` files are the only tracked variants) — double-check `git status` before committing if you've been editing local env files.

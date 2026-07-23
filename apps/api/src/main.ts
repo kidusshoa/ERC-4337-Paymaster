@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
+import { ADMIN_API_KEY_HEADER } from './common/guards/admin-api-key.guard';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 
@@ -25,6 +26,7 @@ async function bootstrap() {
     .setTitle('ERC-4337 Paymaster & Gas Relayer API')
     .setDescription('Sponsors gas for ERC-4337 UserOperations and relays them to the EntryPoint.')
     .setVersion('0.0.1')
+    .addApiKey({ type: 'apiKey', name: ADMIN_API_KEY_HEADER, in: 'header' }, ADMIN_API_KEY_HEADER)
     .build();
   const swaggerDocument = SwaggerModule.createDocument(app, swaggerConfig);
   SwaggerModule.setup('docs', app, swaggerDocument);

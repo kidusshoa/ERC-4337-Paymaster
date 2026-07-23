@@ -46,6 +46,7 @@ brings up Postgres, Redis, Anvil, the one-shot contract deployer, and this API t
 - `src/modules/prisma/` — `PrismaService` (connect/disconnect lifecycle hooks around the generated client)
 - `src/modules/paymaster/` — `POST /paymaster/sponsor`: `PolicyService` (whitelist + quota) + `PaymasterSigningService` (UserOp hashing/signing) + `PaymasterService` (orchestrates both, persists the `UserOperation` row)
 - `src/modules/relayer/` — `POST /relayer/submit` + `GET /userops/:hash`: `RelayerService` (submits real `handleOps` transactions) + `UserOpStateMachineService` (guards `PENDING → SUBMITTED/STUCK → CONFIRMED/FAILED` transitions) + `ConfirmationCheckProcessor` (BullMQ worker: detects stuck transactions and re-broadcasts with bumped fees)
+- `src/modules/paymaster/admin/` — `GET /admin/paymaster-status`: reads the paymaster's live EntryPoint deposit/stake, gated behind `AdminApiKeyGuard`
 
 ## Database (Prisma)
 
@@ -124,6 +125,47 @@ sponsor(@Body() dto: SponsorUserOpDto) { ... }
 ```
 
 Requires Redis reachable (`docker compose up -d redis`) — see `REDIS_URL` and the `RATE_LIMIT_*` vars in `.env.example`.
+
+The wallet tier (`RATE_LIMIT_WALLET_MAX`, default 20/day) and a `SponsorshipPolicy`'s `dailyQuota` (default 5, see `prisma/seed.ts`) are two independent limits, not the same number under two names: the rate limiter is a cheap Redis-backed velocity guard against API abuse, while the quota is the actual business-level daily allowance, enforced separately in Postgres by `PolicyService`. Raising a policy's `dailyQuota` without also raising `RATE_LIMIT_WALLET_MAX` past it just moves the bottleneck to the rate limiter instead.
+
+`RateLimitGuard` keys the IP tier on Express's `req.ip`, which only reflects the real client when Express's `trust proxy` setting matches how the app is actually deployed. This app doesn't set `trust proxy` (main.ts), so by default `req.ip` is the direct TCP peer — safe against a spoofed `X-Forwarded-For` header, but wrong (proxy IP for every client) if you put this behind a reverse proxy without configuring `trust proxy` yourself. If you do, set it to the exact number of trusted hops (e.g. `app.set('trust proxy', 1)` for one load balancer) — never `true`/`'*'`, which re-opens the same spoofing gap.
+
+## Admin: paymaster deposit/stake monitoring
+
+`GET /admin/paymaster-status` reads this paymaster's live `EntryPoint` deposit and stake (`IStakeManager.getDepositInfo`) — the same balance that funds every sponsored UserOp, and the same stake that determines whether the EntryPoint currently considers this paymaster reputable enough to sponsor. Useful for alerting before a paymaster's deposit runs dry and sponsorship starts reverting:
+
+```shell
+curl http://localhost:5010/admin/paymaster-status -H "x-admin-api-key: $ADMIN_API_KEY"
+```
+
+```json
+{
+  "entryPoint": "0x0000000071727De22E5E9d8BAf0edAc6f37da032",
+  "paymaster": "0x...",
+  "depositWei": "1000000000000000000",
+  "lowBalance": false,
+  "lowBalanceThresholdWei": "50000000000000000",
+  "staked": true,
+  "stakeWei": "2000000000000000000",
+  "unstakeDelaySec": 86400,
+  "withdrawTime": 0
+}
+```
+
+Gated by `AdminApiKeyGuard`, compared with `crypto.timingSafeEqual` (a naive `===` leaks the matching prefix length through response timing). Two failure modes, deliberately different:
+
+- **503** — `ADMIN_API_KEY` isn't set on this instance. The endpoint is opt-in, not merely unauthenticated: a forgotten env var fails closed instead of silently exposing operational balance/stake data.
+- **401** — `ADMIN_API_KEY` is set, but the `x-admin-api-key` header is missing or doesn't match.
+
+`lowBalance` flips once the deposit drops below `PAYMASTER_LOW_BALANCE_THRESHOLD_WEI` (default 0.05 ETH) — point a monitoring check at this endpoint rather than watching the contract directly.
+
+## Observability & error handling
+
+Every request gets a correlation ID (`CorrelationIdMiddleware`) — from the incoming `x-correlation-id` header if the caller supplied one (so a client can trace its own sponsor→submit→confirm sequence with one ID across calls), otherwise a fresh UUID. It's echoed back on the response header and included in every error response body.
+
+`LoggingInterceptor` writes exactly one access-log line per request, success or failure — `METHOD URL STATUS +Xms [correlationId]` — including 4xx/5xx responses. This is worth calling out because it's an easy gap to introduce: an interceptor built around `tap()`'s success callback alone silently produces zero log output for every request that ends in an exception (validation errors, policy rejections, rate limits), since the exception filter runs after the interceptor and never route back through it — this one instead taps both `next` and `error`, so a request that 429s is exactly as traceable by its correlation ID as one that succeeds.
+
+`AllExceptionsFilter` normalizes every thrown error (a recognized `HttpException` or not) into one consistent JSON body (`statusCode`/`error`/`message`/`path`/`timestamp`/`correlationId`), and separately logs unhandled (5xx) exceptions with their stack trace server-side — callers never see a stack trace, but one is always available in the logs, keyed by the same correlation ID the client got back.
 
 ## On-chain validation proof
 

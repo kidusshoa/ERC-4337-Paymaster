@@ -48,7 +48,12 @@ export const envValidationSchema = Joi.object({
   // common/guards/rate-limit.guard
   RATE_LIMIT_IP_MAX: Joi.number().integer().positive().default(50),
   RATE_LIMIT_IP_WINDOW_SECONDS: Joi.number().integer().positive().default(60),
-  RATE_LIMIT_WALLET_MAX: Joi.number().integer().positive().default(5),
+  // Deliberately well above the seeded default SponsorshipPolicy's dailyQuota (5,
+  // see prisma/seed.ts) — this tier is a velocity guard against API abuse, not the
+  // business-level daily allowance (that's Policy.dailyQuota, enforced separately in
+  // Postgres). Setting it equal to or below a policy's quota makes this tier the
+  // silent bottleneck instead: raising the quota alone wouldn't help.
+  RATE_LIMIT_WALLET_MAX: Joi.number().integer().positive().default(20),
   RATE_LIMIT_WALLET_WINDOW_SECONDS: Joi.number().integer().positive().default(86400),
 
   // prisma/schema.prisma (read directly by Prisma via its own env() call too — declared
@@ -67,4 +72,12 @@ export const envValidationSchema = Joi.object({
   STUCK_CHECK_DELAY_SECONDS: Joi.number().integer().positive().default(45),
   GAS_BUMP_PERCENT: Joi.number().integer().positive().default(15),
   MAX_GAS_BUMP_ATTEMPTS: Joi.number().integer().positive().default(5),
+
+  // modules/paymaster/admin — GET /admin/paymaster-status. No default: unset means
+  // the endpoint is disabled (503) rather than open, so exposing operational
+  // balance/stake info is an explicit opt-in, not an accident.
+  ADMIN_API_KEY: Joi.string().min(16).optional(),
+  // 0.05 ETH — below this, the endpoint's `lowBalance` flag flips so monitoring can
+  // page someone before the paymaster runs out of deposit and starts reverting ops.
+  PAYMASTER_LOW_BALANCE_THRESHOLD_WEI: Joi.string().pattern(/^\d+$/).default('50000000000000000'),
 });

@@ -93,7 +93,12 @@
       "Bash(PGPASSWORD=paymaster psql -h 127.0.0.1 -p 5434 -U paymaster -d paymaster -c \"select 1;\")",
       "Bash(nc -zv 127.0.0.1 5434)",
       "Bash(nc -zv 127.0.0.1 6381)",
-      "Bash(kill -9 2246)"
+      "Bash(kill -9 2246)",
+      "Bash(nc -zv 127.0.0.1 8555)",
+      "Bash(ps -o pid,ppid,command -ax)",
+      "Bash(kill -9 10067)",
+      "Bash(kill -9 10914 10924)",
+      "Bash(ps --ppid 11304)"
     ]
   }
 }

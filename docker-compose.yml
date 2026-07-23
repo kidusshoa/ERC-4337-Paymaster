@@ -96,6 +96,9 @@ services:
       BULLMQ_PREFIX: "bullmq"
       DATABASE_URL: "postgresql://paymaster:paymaster@postgres:5432/paymaster?schema=public"
       DEPLOYMENT_ENV_FILE: "/deployment/.env.deployed"
+      # Demo-only value gating GET /admin/paymaster-status — generate a real random
+      # secret for anything beyond local Docker Compose (`openssl rand -hex 32`).
+      ADMIN_API_KEY: "local-compose-admin-key-do-not-use-in-prod"
     ports:
       - "5010:5010"
     volumes:
