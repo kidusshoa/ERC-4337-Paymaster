@@ -31,6 +31,77 @@ services:
       timeout: 5s
       retries: 10
 
+  # Local ERC-4337 chain. Fresh state every restart — contracts-deploy (below)
+  # redeploys EntryPoint + VerifyingPaymaster from scratch each time.
+  anvil:
+    image: ghcr.io/foundry-rs/foundry:latest
+    restart: unless-stopped
+    entrypoint: ["anvil", "--host", "0.0.0.0", "--port", "8545", "--chain-id", "31337"]
+    ports:
+      - "8545:8545"
+    healthcheck:
+      test: ["CMD", "cast", "chain-id", "--rpc-url", "http://127.0.0.1:8545"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  # One-shot: deploys VerifyingPaymaster (+ a fresh EntryPoint) to `anvil` via the
+  # same DeployPaymaster.s.sol script used for manual/Sepolia deploys (see
+  # contracts/README.md), then writes the deployed addresses to a shared volume
+  # for the `api` service to load at startup. Exits 0 on success; `api` waits for
+  # that before starting (see its `depends_on` below).
+  contracts-deploy:
+    build:
+      context: ./contracts
+    depends_on:
+      anvil:
+        condition: service_healthy
+    environment:
+      RPC_URL: "http://anvil:8545"
+      # Anvil's well-known account #0 — never fund or reuse this key on a real network.
+      DEPLOYER_PRIVATE_KEY: "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+      # Anvil's well-known account #1 — matches the api service's SIGNER_PRIVATE_KEY
+      # below, since this is the address that must sign paymasterAndData.
+      VERIFYING_SIGNER_ADDRESS: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
+      # 10 ETH, so the sponsor endpoint works immediately without a manual deposit step.
+      PAYMASTER_INITIAL_DEPOSIT_WEI: "10000000000000000000"
+    volumes:
+      - deployment-artifacts:/deployment
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      anvil:
+        condition: service_healthy
+      contracts-deploy:
+        condition: service_completed_successfully
+    environment:
+      NODE_ENV: "production"
+      PORT: "5010"
+      CHAIN_ID: "31337"
+      CHAIN_RPC_URL: "http://anvil:8545"
+      SIGNER_BACKEND: "local"
+      # Anvil's well-known account #1/#2 test keys — never fund or reuse on a real
+      # network. See apps/api/.env.example for the full explanation of each role.
+      SIGNER_PRIVATE_KEY: "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
+      RELAYER_PRIVATE_KEY: "0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a"
+      REDIS_URL: "redis://redis:6379"
+      BULLMQ_PREFIX: "bullmq"
+      DATABASE_URL: "postgresql://paymaster:paymaster@postgres:5432/paymaster?schema=public"
+      DEPLOYMENT_ENV_FILE: "/deployment/.env.deployed"
+    ports:
+      - "5010:5010"
+    volumes:
+      - deployment-artifacts:/deployment:ro
+
 volumes:
   postgres-data:
   redis-data:
+  deployment-artifacts:

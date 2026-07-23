@@ -1,0 +1,11 @@
+**/node_modules
+**/dist
+**/coverage
+**/.git
+**/generated
+apps/api/.env
+contracts/.env
+contracts/out
+contracts/cache
+contracts/broadcast/*/31337
+apps/dashboard

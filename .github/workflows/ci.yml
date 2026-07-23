@@ -25,3 +25,87 @@ jobs:
       - run: pnpm format:check
 
       - run: pnpm lint
+
+  contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+
+      - run: forge build
+        working-directory: contracts
+
+      - run: forge test -vvv
+        working-directory: contracts
+
+  api:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: paymaster
+          POSTGRES_PASSWORD: paymaster
+          POSTGRES_DB: paymaster
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U paymaster -d paymaster"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: "postgresql://paymaster:paymaster@localhost:5432/paymaster?schema=public"
+      REDIS_URL: "redis://localhost:6379"
+      CHAIN_ID: "31337"
+      CHAIN_RPC_URL: "http://127.0.0.1:8545"
+      SIGNER_BACKEND: "local"
+      # Anvil's well-known account #1/#2 test keys — same ones used throughout the
+      # e2e suites and documented in apps/api/.env.example. Never fund/reuse these.
+      SIGNER_PRIVATE_KEY: "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
+      RELAYER_PRIVATE_KEY: "0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a"
+      # Not real contracts — only Phase 10's dedicated on-chain e2e suites deploy and
+      # target their own freshly-deployed addresses; every other suite never calls
+      # the chain, so Joi's required-field validation just needs well-formed values.
+      ENTRY_POINT_ADDRESS: "0x0000000071727De22E5E9d8BAf0edAc6f37da032"
+      PAYMASTER_CONTRACT_ADDRESS: "0xdead0000dead0000dead0000dead0000dead0000"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+
+      # The relayer/paymaster-onchain/gas-bumping e2e suites read compiled artifacts
+      # from contracts/out and spawn their own anvil child process per test.
+      - run: forge build
+        working-directory: contracts
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm --filter @paymaster/api exec prisma migrate deploy
+
+      - run: pnpm --filter @paymaster/api test
+
+      - run: pnpm --filter @paymaster/api test:e2e

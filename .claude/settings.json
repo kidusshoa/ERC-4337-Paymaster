@@ -74,7 +74,26 @@
       "Bash(pnpm test:e2e -- paymaster.e2e-spec)",
       "Bash(sysctl -n hw.ncpu)",
       "Bash(tee /tmp/final-unit.log)",
-      "Bash(echo \"EXIT:$?\")"
+      "Bash(echo \"EXIT:$?\")",
+      "Bash(docker version *)",
+      "Bash(docker pull *)",
+      "Bash(docker run *)",
+      "Bash(chmod +x /Users/abcomputers/Documents/projects/side/ERC-4337-Paymaster/contracts/script/docker-deploy.sh)",
+      "Bash(chmod +x /Users/abcomputers/Documents/projects/side/ERC-4337-Paymaster/apps/api/docker-entrypoint.sh)",
+      "Bash(jobs)",
+      "Bash(docker buildx *)",
+      "Bash(pnpm --version)",
+      "Bash(npm dist-tag *)",
+      "Bash(docker volume *)",
+      "Bash(curl -s -w '\\\\nHTTP %{http_code}\\\\n' http://localhost:5010/health)",
+      "Bash(curl -s -o /dev/null -w 'HTTP %{http_code}\\\\n' http://localhost:5010/docs)",
+      "Bash(curl -s -X POST http://localhost:5010/paymaster/sponsor -H 'Content-Type: application/json' -d '{ *)",
+      "Bash(tee /tmp/sponsor-resp.json)",
+      "Bash(python3 -c \"import yaml,sys; yaml.safe_load\\(open\\('/Users/abcomputers/Documents/projects/side/ERC-4337-Paymaster/.github/workflows/ci.yml'\\)\\); print\\('YAML OK'\\)\")",
+      "Bash(PGPASSWORD=paymaster psql -h 127.0.0.1 -p 5434 -U paymaster -d paymaster -c \"select 1;\")",
+      "Bash(nc -zv 127.0.0.1 5434)",
+      "Bash(nc -zv 127.0.0.1 6381)",
+      "Bash(kill -9 2246)"
     ]
   }
 }

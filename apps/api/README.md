@@ -14,6 +14,27 @@ pnpm --filter @paymaster/api start:dev
 
 `PORT` defaults to 5010 — from the 5010-5019 range reserved for this project's own services, rather than the more common 3000, to avoid clashing with other local projects.
 
+## Docker
+
+`Dockerfile` builds from the **repo root** (`docker-compose.yml`'s `api` service sets `context: .`), since this is a pnpm workspace package and needs the root lockfile/manifest to install correctly. devDependencies are kept in the final image on purpose — `prisma db seed` runs `ts-node prisma/seed.ts`, so the Prisma CLI and ts-node need to be present at container start, not just at build time.
+
+`docker-entrypoint.sh` runs on every container start, before the API process itself:
+
+1. If `/deployment/.env.deployed` exists, source it into the environment. On Anvil, `ENTRY_POINT_ADDRESS`/`PAYMASTER_CONTRACT_ADDRESS` change on every `docker compose up` (the `contracts-deploy` one-shot service in the root `docker-compose.yml` deploys fresh contracts and writes their addresses there — see `contracts/script/docker-deploy.sh`) — this is how the API picks them up without anyone hand-editing an `.env` file.
+2. `pnpm exec prisma migrate deploy` — applies any pending migrations.
+3. `pnpm exec prisma db seed` — idempotent, safe to run on every start.
+4. `exec node dist/src/main.js` — replaces the shell process so the API receives signals directly (`SIGTERM` on `docker compose down` triggers Nest's shutdown hooks instead of being swallowed by a wrapper shell).
+
+`dist/src/main.js`, not `dist/main.js`: since `tsconfig.json` has no explicit `rootDir` and the TS program includes files outside `src/` (`prisma/seed.ts`, `prisma.config.ts`), TypeScript infers the package root as the common root and nests build output under `dist/src/`, `dist/prisma/`, etc. — `start:prod` matches this for the same reason.
+
+From the repo root:
+
+```shell
+docker compose up -d --build
+```
+
+brings up Postgres, Redis, Anvil, the one-shot contract deployer, and this API together — see the root [README.md](../../README.md#quickstart-docker-compose) for the full quickstart.
+
 ## Structure
 
 - `src/config/` — env validation (Joi schema, fails fast at boot on missing/malformed vars)
